@@ -16,6 +16,10 @@ Scraping fresh public proxies from different sources:
 Use this command to install dependencies.
 
 ```bash
+python3 -m venv env
+
+source env/bin/activate
+
 pip3 install -r requirements.txt
 ```
 
