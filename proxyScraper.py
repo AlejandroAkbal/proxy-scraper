@@ -1,120 +1,204 @@
-import requests
-from bs4 import BeautifulSoup
-import threading
 import os
+import threading
 import asyncio
 import argparse
+from pathlib import Path
+import shutil
 
-pathTextFile = ''
-proxyType = ''
+import requests
+from bs4 import BeautifulSoup
 
-# From proxyscrape.com 
-def proxyscrapeScraper(proxytype, timeout, country):
-    response = requests.get("https://api.proxyscrape.com/?request=getproxies&proxytype=" + proxytype + "&timeout=" + timeout + "&country=" + country)
-    proxies = response.text
-    with open(pathTextFile, "a") as txt_file:
-        txt_file.write(proxies)
+default_output_directory = 'output'
+default_output_file_name = default_output_directory + '/' + 'proxy_list'
 
 
-# From proxy-list.download
-def proxyListDownloadScraper(url, type, anon):
-    session = requests.session()
-    url = url + '?type=' + type + '&anon=' + anon 
-    html = session.get(url).text
-    if args.verbose:
-        print(url)
-    with open(pathTextFile, "a") as txt_file:
-        for line in html.split('\n'):
-            if len(line) > 0:
-                txt_file.write(line)
-                
+def proxyScraper(website, proxy_type, proxy_timeout='1000', proxy_country='all', proxy_ssl='all', proxy_anonymity='all'):
+
+    output_file_name = default_output_file_name + '_' + proxy_type + '.txt'
+
+    if (website == 'proxyscrape'):
+        scraper_for_proxyscrape(proxy_type, proxy_timeout, proxy_country,
+                                proxy_ssl, proxy_anonymity, output_file_name)
+
+    elif (website == 'proxy-list'):
+        scraper_for_proxy_list(proxy_type, proxy_country,
+                               proxy_anonymity, output_file_name)
+
+    elif (website == 'free-proxy-list'):
+        url = 'https://free-proxy-list.net'
+
+        scrape_proxies_from_url(url, output_file_name)
+
+    elif (website == 'sslproxies'):
+        url = 'https://sslproxies.org'
+
+        scrape_proxies_from_url(url, output_file_name)
+
+    elif (website == 'us-proxy'):
+        url = 'https://us-proxy.org'
+
+        scrape_proxies_from_url(url, output_file_name)
+
+    elif (website == 'socks-proxy'):
+        url = 'https://socks-proxy.net'
+
+        scrape_proxies_from_url(url, output_file_name)
 
 
-# From sslproxies.org, free-proxy-list.net, us-proxy.org, socks-proxy.net
-def makesoup(url):
-    page=requests.get(url)
-    if args.verbose:
-        print(url + ' scraped successfully')
-    return BeautifulSoup(page.text,"html.parser")
+def scraper_for_proxyscrape(proxy_type, proxy_timeout, proxy_country, proxy_ssl, proxy_anonymity, output_file_name):
+    url = "https://api.proxyscrape.com/v2/?request=getproxies" + \
+        "&protocol=" + proxy_type + \
+        "&timeout=" + proxy_timeout + \
+        "&country=" + proxy_country + \
+        "&ssl=" + proxy_ssl + \
+        "&anonymity=" + proxy_anonymity
 
-def proxyscrape(table):
+    proxy_list = requests.get(url).text
+
+    with open(output_file_name, "a") as file:
+
+        file.write(proxy_list)
+
+
+def scraper_for_proxy_list(proxy_type, proxy_country, proxy_anonymity, output_file_name):
+    url = "https://www.proxy-list.download/api/v1/get" + '?type=' + proxy_type
+
+    if (proxy_anonymity != 'all'):
+        url += '&anon=' + proxy_anonymity
+
+    if (proxy_country != 'all'):
+        url += '$country=' + proxy_country
+
+    proxy_list = requests.get(url).text
+
+    # print_if_verbose(url + ' scraped successfully')
+
+    with open(output_file_name, "a") as file:
+        file.write(proxy_list)
+
+
+def scrape_proxies_from_url(url, output_file_name):
+    raw_html = requests.get(url).text
+
+    # print_if_verbose(url + ' scraped successfully')
+
+    parsed_html = parse_html(raw_html)
+
+    html_table = table = parsed_html.find(
+        'table', attrs={'id': 'proxylisttable'})
+
+    extracted_proxy_list = scrape_proxies_from_html_table(html_table)
+
+    proxy_list = set()
+
+    proxy_list.update(extracted_proxy_list)
+
+    with open(output_file_name, "a") as txt_file:
+
+        for line in proxy_list:
+
+            txt_file.write("".join(line) + "\n")
+
+
+def parse_html(raw_html):
+    parsed_html = BeautifulSoup(raw_html, "html.parser")
+
+    return parsed_html
+
+
+def scrape_proxies_from_html_table(table):
     proxies = set()
-    for row in table.findAll('tr'):
-        fields = row.findAll('td')
+
+    table_rows = table.findAll('tr')
+
+    for row in table_rows:
+
         count = 0
         proxy = ""
-        for cell in row.findAll('td'):
+
+        table_cells = row.findAll('td')
+
+        for cell in table_cells:
+
             if count == 1:
                 proxy += ":" + cell.text.replace('&nbsp;', '')
+
                 proxies.add(proxy)
                 break
+
             proxy += cell.text.replace('&nbsp;', '')
+
             count += 1
+
     return proxies
 
-def scrapeproxies(url):
-    soup=makesoup(url)
-    result = proxyscrape(table = soup.find('table', attrs={'id': 'proxylisttable'}))
-    proxies = set()
-    proxies.update(result)
-    with open(pathTextFile, "a") as txt_file:
-        for line in proxies:
-	        txt_file.write("".join(line) + "\n")
+
+# def print_if_verbose(text):
+    # if args.verbose:
+    #     print(text)
 
 
-# output watcher
-def output():
-    if os.path.exists(pathTextFile):
-        os.remove(pathTextFile)
-    elif not os.path.exists(pathTextFile):
-        with open(pathTextFile, 'w'): pass
+def remove_and_create_output_dir(dir_path):
+
+    if (os.path.exists(dir_path)):
+        shutil.rmtree(dir_path)
+
+    os.mkdir(dir_path)
+
 
 if __name__ == "__main__":
 
-        global proxy
+    # TODO: deduplicate
 
-        parser = argparse.ArgumentParser()
-        parser.add_argument("-p", "--proxy", help="Supported proxy type: http ,https, socks, socks4, socks5", required=True)
-        parser.add_argument("-o", "--output", help="output file name to save .txt file", default='output.txt')
-        parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
-        args = parser.parse_args()
+    parser = argparse.ArgumentParser()
 
-        proxy = args.proxy
-        pathTextFile = args.output
+    parser.add_argument(
+        "-p", "--proxy", help="Proxy type: http ,https, socks, socks4, socks5")
 
-        if proxy == 'https':
-            threading.Thread(target=scrapeproxies, args=('http://sslproxies.org',)).start()
-            threading.Thread(target=proxyListDownloadScraper, args=('https://www.proxy-list.download/api/v1/get', 'https', 'elite',)).start()
-#            threading.Thread(target=proxyListDownloadScraper, args=('https://www.proxy-list.download/api/v1/get', 'https', 'transparent',)).start()
-#            threading.Thread(target=proxyListDownloadScraper, args=('https://www.proxy-list.download/api/v1/get', 'https', 'anonymous',)).start()
-            
-            output()
+    parser.add_argument("-v", "--verbose",
+                        help="Increase output verbosity", action="store_true")
 
-        if proxy == 'http':
-            threading.Thread(target=scrapeproxies, args=('http://free-proxy-list.net',)).start()
-            threading.Thread(target=scrapeproxies, args=('http://us-proxy.org',)).start()
-            threading.Thread(target=proxyscrapeScraper, args=('http','1000','All',)).start()
-            threading.Thread(target=proxyListDownloadScraper, args=('https://www.proxy-list.download/api/v1/get', 'http', 'elite',)).start()
-            threading.Thread(target=proxyListDownloadScraper, args=('https://www.proxy-list.download/api/v1/get', 'http', 'transparent',)).start()
-            threading.Thread(target=proxyListDownloadScraper, args=('https://www.proxy-list.download/api/v1/get', 'http', 'anonymous',)).start()
-            output()
+    args = parser.parse_args()
+    proxy_type = args.proxy
 
-        if proxy == 'socks':
-            threading.Thread(target=scrapeproxies, args=('http://socks-proxy.net',)).start()
-            threading.Thread(target=proxyscrapeScraper, args=('socks4','1000','All',)).start()
-            threading.Thread(target=proxyscrapeScraper, args=('socks5','1000','All',)).start()
-            threading.Thread(target=proxyListDownloadScraper, args=('https://www.proxy-list.download/api/v1/get', 'socks5', 'elite',)).start()
-            threading.Thread(target=proxyListDownloadScraper, args=('https://www.proxy-list.download/api/v1/get', 'socks4', 'elite',)).start()
-            output()
+    remove_and_create_output_dir(default_output_directory)
 
-        if proxy == 'socks4':
-            threading.Thread(target=proxyscrapeScraper, args=('socks4','1000','All',)).start()
-            threading.Thread(target=proxyListDownloadScraper, args=('https://www.proxy-list.download/api/v1/get', 'socks4', 'elite',)).start()
-            output()
+    # HTTP
+    threading.Thread(target=proxyScraper, args=(
+        'proxyscrape', 'http')).start()
 
-        if proxy == 'socks5':
-            threading.Thread(target=proxyscrapeScraper, args=('socks5','1000','All',)).start()
-            threading.Thread(target=proxyListDownloadScraper, args=('https://www.proxy-list.download/api/v1/get', 'socks5', 'elite',)).start()
-            output()
+    threading.Thread(target=proxyScraper, args=(
+        'proxy-list', 'http')).start()
 
+    threading.Thread(target=proxyScraper, args=(
+        'us-proxy', 'http')).start()
 
+    threading.Thread(target=proxyScraper, args=(
+        'free-proxy-list', 'http')).start()
+
+    # HTTPS
+    threading.Thread(target=proxyScraper, args=(
+        'proxyscrape', 'https')).start()
+
+    threading.Thread(target=proxyScraper, args=(
+        'proxy-list', 'https')).start()
+
+    threading.Thread(target=proxyScraper, args=(
+        'sslproxies', 'https')).start()
+
+    # SOCKS4
+    threading.Thread(target=proxyScraper, args=(
+        'proxyscrape', 'socks4')).start()
+
+    threading.Thread(target=proxyScraper, args=(
+        'proxy-list', 'socks4')).start()
+
+    threading.Thread(target=proxyScraper, args=(
+        'socks-proxy', 'socks4')).start()
+
+    # SOCKS5
+    threading.Thread(target=proxyScraper, args=(
+        'proxyscrape', 'socks5')).start()
+
+    threading.Thread(target=proxyScraper, args=(
+        'proxy-list', 'socks5')).start()
